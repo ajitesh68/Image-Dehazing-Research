@@ -1,0 +1,34 @@
+model:
+  name: "UNet"
+  in_channels: 3
+  out_channels: 3
+  features: [64, 128, 256]
+  use_batch_norm: true
+  dropout_rate: 0.3
+data:
+  data_dir: "../RESIDE-6K"
+  image_size: 128
+  train_split: 0.7
+  val_split: 0.15
+  test_split: 0.15
+  num_workers: 0
+training:
+  batch_size: 4
+  epochs: 50
+  learning_rate: 0.001
+  optimizer: "adam"
+  scheduler:
+    name: "reduce_on_plateau"
+    patience: 5
+    factor: 0.5
+loss:
+  type: "combined"
+  l1_weight: 1.0
+  ssim_weight: 0.5
+output:
+  save_dir: "./experiments"
+  save_every: 10
+  log_every: 1
+accelerator:
+  device: "auto"
+  tpu_cores: 8
