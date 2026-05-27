@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from torchvision import models
+
 class L1Loss(nn.Module):
 
     def __init__(self):
@@ -48,19 +50,51 @@ class SSIMLoss(nn.Module):
         ssim_value = ssim_map.mean()
         return 1.0 - ssim_value
 
+
+class PerceptualLoss(nn.Module):
+
+    def __init__(self, feature_layer=16):
+        super(PerceptualLoss, self).__init__()
+        vgg = models.vgg16(weights=models.VGG16_Weights.IMAGENET1K_V1)
+
+        self.feature_extractor = nn.Sequential(
+          *list(vgg.features.children())[:feature_layer]
+        )
+
+        for param in self.feature_extractor.parameters():
+            param.requires_grad = False
+
+    def forward(self, prediction, target):
+        pred_features = self.feature_extractor(prediction)
+        targt_features = self.feature_extractor(target)
+
+        return F.l1_loss(pred_features, targt_features)
+
+
 class CombinedLoss(nn.Module):
 
-    def __init__(self, l1_weight=1.0, ssim_weight=0.5):
+    def __init__(self, l1_weight=1.0, ssim_weight=0.5, perceptual_weight=0.04):
         super(CombinedLoss, self).__init__()
         self.l1_loss = L1Loss()
         self.ssim_loss = SSIMLoss()
         self.l1_weight = l1_weight
         self.ssim_weight = ssim_weight
+        self.perceptual_weight = perceptual_weight
+        self.perceptual_loss = None
+
+        if perceptual_weight > 0:
+          self.perceptual_loss = PerceptualLoss()
+          print(f"Perceptual Loss Active")
 
     def forward(self, prediction, target):
         l1 = self.l1_loss(prediction, target)
         ssim = self.ssim_loss(prediction, target)
         total = self.l1_weight * l1 + self.ssim_weight * ssim
+
+        if self.perceptual_loss is not None:
+          perceptual = self.perceptual_loss(prediction, target)
+          total += self.perceptual_weight * perceptual
+
         return total
 
 def get_loss_function(config):
