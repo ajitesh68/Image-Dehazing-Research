@@ -23,6 +23,50 @@ class ChannelAttention(nn.Module):
         return x * y
 
 
+class PixelAttention(nn.Module):
+
+    def __init__(self, channels):
+        super(PixelAttention, self).__init__()
+        self.fc = nn.Sequential(
+            nn.Conv2d(channels, channels // 4, kernel_size=1),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(channels // 4, 1, kernel_size=1),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        attention_map = self.fc(x)
+        return x * attention_map
+
+
+class TransposedSelfAttention(nn.Module):
+
+    def __init__(self, channels, num_heads=4):
+        super(TransposedSelfAttention, self).__init__()
+        self.num_heads = num_heads
+        self.temperature = nn.Parameter(torch.ones(num_heads, 1, 1))
+        self.qkv = nn.Conv2d(channels, channels * 3, kernel_size=1, bias=False)
+        self.qkv_dwconv = nn.Conv2d(channels * 3, channels * 3, kernel_size=3,
+                                    padding=1, groups=channels * 3)
+        self.project_out = nn.Conv2d(channels, channels, kernel_size=1, bias=False)
+
+    def forward(self, x):
+        b, c, h, w = x.shape
+        qkv = self.qkv_dwconv(self.qkv(x))
+        q, k, v = qkv.chunk(3, dim=1)
+        q = q.reshape(b, self.num_heads, c // self.num_heads, h * w)
+        k = k.reshape(b, self.num_heads, c // self.num_heads, h * w)
+        v = v.reshape(b, self.num_heads, c // self.num_heads, h * w)
+        q = torch.nn.functional.normalize(q, dim=-1)
+        k = torch.nn.functional.normalize(k, dim=-1)
+        attn = (q @ k.transpose(-2, -1)) * self.temperature
+        attn = attn.softmax(dim=-1)
+        out = (attn @ v)
+        out = out.reshape(b, c, h, w)
+        out = self.project_out(out)
+        return out
+
+
 class ConvBlock(nn.Module):
 
     def __init__(self, in_channels, out_channels, use_batch_norm=True, dropout_rate=0.0):
@@ -43,7 +87,8 @@ class ConvBlock(nn.Module):
             layers.append(nn.Dropout2d(dropout_rate))
 
         self.block = nn.Sequential(*layers)
-        self.attention = ChannelAttention(out_channels)
+        self.channel_attention = ChannelAttention(out_channels)
+        self.pixel_attention = PixelAttention(out_channels)
 
         if in_channels != out_channels:
             self.shortcut = nn.Conv2d(in_channels, out_channels, kernel_size=1)
@@ -53,7 +98,8 @@ class ConvBlock(nn.Module):
     def forward(self, x):
         identity = x
         out = self.block(x)
-        out = self.attention(out)
+        out = self.channel_attention(out)
+        out = self.pixel_attention(out)
 
         if self.shortcut is not None:
             identity = self.shortcut(identity)
@@ -155,4 +201,4 @@ if __name__ == '__main__':
     print(f'Output min: {output.min().item():.4f}')
     print(f'Output max: {output.max().item():.4f}')
 
-    print('\n✅ Model test PASS! U-Net sahi kaam kar raha hai.')
+    print('\n✅ Model test PASS!')
